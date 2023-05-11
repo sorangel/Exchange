@@ -1,0 +1,475 @@
+type ExchangeRateOptions = {
+    lang?: SupportedLanguageCodes;
+    referenceCurrency?: ReferenceCurrency;
+    country?: ExchangeRateCountry;
+    querySelector?: string;
+    callbackExchange?: () => void;
+}
+type ExchangeRate = {
+    country_name:string,
+    country_code:ExchangeRateCountry,
+    currency_symbol:'$'|'&euro;'|'&#8353;'|'COP'|'L'|'C$'|'Q',
+    currency_code:'USD'|'EUR'|'CRC'|'COP'|'LPS'|'COR'|'QTZ',
+    decimals:number,
+    buy?:number,
+    sell?: number
+};
+type ExchangeRateCountry = 'CR'|'HN'|'GT'|'NI'|'CO'|'GO'|'PA'|'SV';
+type ReferenceCurrency =  'USD' | 'EUR';
+type ExchangeRates = {
+    USD:ExchangeRate[],
+    EUR:ExchangeRate[]
+};
+
+type ExchangeRateMode = 'buy'|'sell';
+
+type ExchangeRateModel = {
+    calculator:ExchangeRateCalc,
+    referenceCurrency:ReferenceCurrency,
+    country:ExchangeRateCountry,
+    inputAmmount?:number,
+    result?:number,
+    mode:ExchangeRateMode 
+}
+const CurrencySymbols = {
+    USD : '$',
+    EUR : '&euro;',
+    CRC : '&#8353;',
+    COP : 'COP',
+    LPS : 'L',
+    COR : 'C$',
+    QTZ : 'Q'
+}
+
+const SupportedReferenceCurrencies:ReferenceCurrency[] =  ['USD' , 'EUR'];
+
+const suportedExchangeRates:ExchangeRate[] = [
+    {
+        country_code:'PA',
+        country_name:'Panama',
+        currency_code: 'USD',
+        currency_symbol:'$',
+        decimals:4
+    },
+    {
+        country_code:'CR',
+        country_name:'Costa Rica',
+        currency_code: 'CRC',
+        currency_symbol:'&#8353;',
+        decimals:4
+    },
+    {
+        country_code:'NI',
+        country_name:'Nicaragua',
+        currency_code: 'COR',
+        currency_symbol:'C$',
+        decimals:4
+    },
+    {
+        country_code:'HN',
+        country_name:'Honduras',
+        currency_code: 'LPS',
+        currency_symbol:'L',
+        decimals:4
+    },
+    {
+        country_code:'SV',
+        country_name:'El Salvador',
+        currency_code: 'USD',
+        currency_symbol:'$',
+        decimals:4
+    },
+    {
+        country_code:'GT',
+        country_name:'Guatemala',
+        currency_code: 'QTZ',
+        currency_symbol:'Q',
+        decimals:4
+    },
+    {
+        country_code:'GO',
+        country_name:'Guatemala zona maritima',
+        currency_code: 'USD',
+        currency_symbol:'$',
+        decimals:4
+    }
+]
+
+
+
+class ExchangeRateComponent extends Multilanguage {
+    querySelector?:string;
+    rootElement: HTMLDivElement;
+    calculator:ExchangeRateCalc;
+    isDolarizedCountry = false;
+    callbackExchange?: (any:ExchangeRates) => void = () => undefined;
+
+    model:{
+        referenceCurrency:ReferenceCurrency,
+        country:ExchangeRateCountry,
+        inputAmmount?:number,
+        result?:number,
+        mode:ExchangeRateMode 
+    }
+    
+    constructor(options:ExchangeRateOptions) {
+        super(options.lang);
+        if(options.callbackExchange)
+        this.callbackExchange = options.callbackExchange;
+        this.model = {
+            referenceCurrency : options.referenceCurrency? options.referenceCurrency : 'USD',
+            country : options.country? options.country : 'CR',
+            mode : 'buy',
+            inputAmmount : 0.0000,
+            result : 0.0000,
+        }
+
+        let component = this;
+        let xhttp = new XMLHttpRequest();
+        xhttp.onreadystatechange = function() {
+            if (this.readyState == 4 && this.status == 200) {
+                if(xhttp.responseXML){
+                    component.calculator = new ExchangeRateCalc(convertXmlToJson(xhttp), options.referenceCurrency, options.country);
+                    if('USD' == component.calculator.selectedExchangeRate.currency_code){
+                        component.isDolarizedCountry = true;
+                        component.model.referenceCurrency = 'EUR';
+                        component.model.mode = 'sell';
+                        component.calculator = new ExchangeRateCalc(convertXmlToJson(xhttp), component.model.referenceCurrency, options.country);
+                    }
+                    component.querySelector = options.querySelector;
+                    component.shouldShow(component);
+                    if( component.callbackExchange)
+                    component.callbackExchange(component.getExchangeNow());
+                }
+               
+            }
+        };
+        xhttp.open("GET", "https://www.sucursalelectronica.com/exchangerate/showXmlExchangeRate.do", true);
+        xhttp.send();
+    }
+
+    private shouldShow(component: any): void{
+        if(component.querySelector){
+            component.showIn(component.querySelector);
+        }
+    }
+
+    private showIn(querySelector:string):void{
+        this.querySelector = querySelector;
+        this.rootElement = document.querySelector(this.querySelector) as HTMLDivElement;
+        this.rootElement.innerHTML = '';
+        if(!this.rootElement.id){
+            this.rootElement.id = BLUEUtils.makeRandomId(15);
+        }
+
+        this.makeReferenceCurrencies();
+        this.getBuyAndSellOptions();
+        this.makeInputSection();
+        this.makeResultLabelSection();
+    }
+
+    buy(ammount:number):number{
+       this.model.mode = 'buy';
+       this.model.inputAmmount = ammount;
+       this.model.result = this.calculator.buy(ammount);
+       if(this.querySelector){
+            this.refreshCurrencyInput();
+            this.makeResultLabelSection()
+       }
+       return this.model.result;
+    }
+
+    sell(ammount:number):number{
+        this.model.mode = 'sell';
+        this.model.inputAmmount = ammount;
+        this.model.result = this.calculator.sell(ammount);
+        if(this.querySelector){
+            this.refreshCurrencyInput();
+            this.makeResultLabelSection()
+        }
+        return this.model.result;
+    }
+
+    getExchangeNow():ExchangeRates{
+        let exchangeRate: ExchangeRates = {USD:[], EUR:[]};
+        exchangeRate.EUR.push(this.calculator.exchangeRates.EUR.filter(val => val.country_code == this.calculator.country)[0]);
+        exchangeRate.USD.push(this.calculator.exchangeRates.USD.filter(val => val.country_code == this.calculator.country)[0]);
+        return exchangeRate;
+    }
+
+    toggleMode(){
+        if (this.model.mode == 'buy') {
+            this.model.mode = 'sell';
+            if(this.model.inputAmmount){
+                this.model.result = this.calculator.sell(this.model.inputAmmount);
+            }
+            
+        } else {
+            this.model.mode = 'buy';
+            if(this.model.inputAmmount){
+                this.model.result = this.calculator.buy(this.model.inputAmmount);
+            }
+        }
+        ExchangeRateComponent.toggleModeStyles(this.rootElement?.id);
+        this.refreshCurrencyInput();
+        this.makeResultLabelSection();
+    }
+    toggleReference(reference:ReferenceCurrency){
+        this.calculator = new ExchangeRateCalc(this.calculator.exchangeRates, reference, this.model.country);
+        this.model = {
+            referenceCurrency : reference,
+            country : this.model.country,
+            mode : 'buy',
+            inputAmmount : this.model.inputAmmount
+        }
+        if(this.model.inputAmmount){
+            this.model.result = this.calculator.buy(this.model.inputAmmount);
+        }
+        if(this.querySelector){
+            this.showIn(this.querySelector);
+        }
+    }
+    
+    static toggleModeStyles(idReference: string) {
+        document.getElementById(`sellBotton`+idReference)?.classList.toggle('f-weight-l');
+        document.getElementById(`sellBotton`+idReference)?.classList.toggle('typography-h4');
+        document.getElementById(`buyBotton`+idReference)?.classList.toggle('f-weight-l');
+        document.getElementById(`buyBotton`+idReference)?.classList.toggle('typography-h4');
+    }
+
+    private setInputBehaivor() {
+        let component = this;
+        document.getElementById(`switch${this.rootElement?.id}`)?.addEventListener('click', (event) => {
+            component.toggleMode();
+
+        });
+        document.getElementById(`inputCalcAmmount${this.rootElement?.id}`)?.addEventListener('keyup', (event) => {
+            let calcInputElement = document.getElementById(`inputCalcAmmount${this.rootElement?.id}`) as HTMLInputElement;
+            if (calcInputElement) {
+                if (component.model.mode == 'buy') {
+                    component.buy(Number(calcInputElement.value));
+                } else {
+                    component.sell(Number(calcInputElement.value));
+                }
+            }
+        });
+    }
+
+    private makeReferenceCurrencies(){
+        if(this.isDolarizedCountry){
+            this.rootElement.appendChild(BLUEUtils.stringToHTML(
+                `<div class="col-12 m-top-m d-flex j-content-center">
+                    <label class="typography-h2 f-weight-m">${this.labels.EUR}</label>
+                </div>`
+            ));
+            
+        }else{
+            this.rootElement.appendChild(BLUEUtils.stringToHTML(
+                `<div class="col-12 m-top-m m-x-m p-reset">
+                    <h5 class="typography-h5 f-weight-m" >${this.labels.select_currency_label}</h5>
+                </div>`
+            ));
+            this.rootElement.appendChild(BLUEUtils.stringToHTML(
+                `<div class="col-12 d-flex m-top-s j-content-between p-x-reset">
+                    <div class="col-6 p-reset">
+                        <div class="p-right-xs p-x-m">
+                            <input type="radio" name="referenceCurrency" ${this.model.referenceCurrency == 'USD'? 'checked' : ''} class="selection-box" id="referenceCurrencyUSD${this.rootElement?.id}">
+                            <label class="selection-box-label" for="referenceCurrencyUSD${this.rootElement?.id}" >${this.labels.USD}</label>
+                        </div>
+                    </div>
+                    <div class="col-6 p-reset">
+                        <div class="p-x-m">
+                            <input type="radio" name="referenceCurrency" ${this.model.referenceCurrency == 'EUR'? 'checked' : ''} class="selection-box" id="referenceCurrencyEUR${this.rootElement?.id}">
+                            <label class="selection-box-label" for="referenceCurrencyEUR${this.rootElement?.id}">${this.labels.EUR}</label>
+                        </div>
+                    </div>
+                 </div>`
+            ));
+            this.rootElement.appendChild(BLUEUtils.stringToHTML(
+                `<hr class="hr-primary  m-top-l">`
+            ));
+            let component = this;
+            document.getElementById('referenceCurrencyUSD'+this.rootElement?.id)?.addEventListener('click', (event) => {
+                component.toggleReference('USD');
+            });
+            document.getElementById('referenceCurrencyEUR'+this.rootElement?.id)?.addEventListener('click', (event) => {
+                component.toggleReference('EUR');
+            });
+        }
+        
+    }
+    private getBuyAndSellOptions():void{
+        this.rootElement.appendChild(BLUEUtils.stringToHTML(
+            `<div class="col-12 d-flex m-top-l m-x-s j-content-center gap-m">
+                <button id="buyBotton${this.rootElement?.id}" type="button" class="m-right-xs t-align-center btn btn-auxiliary ${this.model.mode == 'buy'? 'f-weight-l typography-h4' : ''}">${this.labels.buy}: <span id="buyBottonSymbol">${CurrencySymbols[this.calculator.selectedExchangeRate.currency_code]}</span><span id="buyBottonAmount">${this.calculator.selectedExchangeRate.buy}</span></button>
+            <div class="b-left"></div>
+                <button id="sellBotton${this.rootElement?.id}" type="button" class="m-left-xs t-align-center btn btn-auxiliary ${this.model.mode == 'sell'? 'f-weight-l typography-h4' : ''}">${this.labels.sell}: <span id="sellBottonSymbol">${CurrencySymbols[this.calculator.selectedExchangeRate.currency_code]}</span><span id="sellBottonAmount">${this.calculator.selectedExchangeRate.sell}</span></button>
+            </div>`
+        ));
+        let componenent = this;
+        document.getElementById(`buyBotton${this.rootElement?.id}`)?.addEventListener('click', (event)=>{
+            if(this.model.mode == 'sell'){
+                ExchangeRateComponent.toggleModeStyles(this.rootElement?.id);
+                let calcInputElement = document.getElementById(`inputCalcAmmount${this.rootElement?.id}`) as HTMLInputElement;
+                if(calcInputElement){
+                    componenent.model.mode = 'buy';
+                    componenent.buy(Number(calcInputElement.value));
+                }
+            }
+           
+            
+        });
+        document.getElementById(`sellBotton${this.rootElement?.id}`)?.addEventListener('click', (event)=>{
+            if(this.model.mode == 'buy'){
+                ExchangeRateComponent.toggleModeStyles(this.rootElement?.id);
+
+                let calcInputElement = document.getElementById(`inputCalcAmmount${this.rootElement?.id}`) as HTMLInputElement;
+                if(calcInputElement){
+                    componenent.model.mode = 'sell';
+                    componenent.sell(Number(calcInputElement.value));
+                }
+            }
+        });
+    }
+
+    private makeInputSection():void{
+        let inputSectionContainer = document.createElement('div');
+            inputSectionContainer.classList.add('d-flex','m-top-s','a-items-center','p-x-l');
+            inputSectionContainer.setAttribute('id', `inputSectionContainer${this.rootElement?.id}`);
+            inputSectionContainer.append(
+                    BLUEUtils.stringToHTML(`<div class="p-x-m c-brand-low cursor-pointer" id="switch${this.rootElement?.id}">
+                                                <i class="icons half-arrow-up-down-filled-before icons-xl"></i>
+                                            </div>`),
+                );
+            inputSectionContainer.append(BLUEUtils.stringToHTML(
+                `<div class="d-flex f-grow-1">
+                    <input id="inutCurrencyCode${this.rootElement?.id}" class="t-align-center bg-color-white input-file p-s typography-placeholder m-reset" disabled="" value="${this.model.mode == 'buy'? this.model.referenceCurrency : this.calculator.selectedExchangeRate.currency_code}">
+                    <input id="inputCalcAmmount${this.rootElement?.id}" type="text" placeholder="0" class="input-main typography-placeholder t-align-right" value="${this.model.inputAmmount ? this.calculator.selectedExchangeRate.decimals : 0 }">
+                </div>`
+                ));
+
+            this.rootElement.appendChild(inputSectionContainer);
+            this.setInputBehaivor();
+        
+    }
+    
+    private refreshCurrencyInput() {
+        let inutCurrencyCode = document.getElementById(`inutCurrencyCode${this.rootElement?.id}`) as HTMLInputElement;
+        if (inutCurrencyCode) {
+            inutCurrencyCode.value = this.model.mode == 'buy' ? this.model.referenceCurrency : this.calculator.selectedExchangeRate.currency_code;
+        }
+    }
+    private makeResultLabelSection(){
+        let amountAsString = ''+this.model.result;
+        let decimals:string;
+        if(amountAsString.includes('.') && this.model.result){
+            if(this.model.result > 0 && Number(this.model.result.toFixed(this.calculator.selectedExchangeRate.decimals)) == 0.0000){
+                decimals = this.getDecimalPartOfString(0.0000.toFixed(this.calculator.selectedExchangeRate.decimals));
+            }else{
+                let decimalPartOfResult = this.decilmalPartOf(this.model.result);
+                decimals = decimalPartOfResult.split('.')[1];
+            }
+            
+        }else{
+            decimals = this.getDecimalPartOfString(0.0000.toFixed(this.calculator.selectedExchangeRate.decimals));
+        }
+        document.getElementById(`resultContainer${this.rootElement?.id}`)?.remove();
+
+        this.rootElement.appendChild(BLUEUtils.stringToHTML(
+            
+            `<div class="t-align-right m-top-m p-x-l m-bottom-s" id="resultContainer${this.rootElement?.id}"> 
+                <p class="typography-h3 "> <span id="resultSymbol${this.rootElement?.id}">${this.model.mode == 'buy'? this.calculator.selectedExchangeRate.currency_code : this.model.referenceCurrency} </span><span id="resultAmmount${this.rootElement?.id}">${this.model.result? this.formatAmountMiles(Math.trunc(this.model.result)): 0}</span>.<span class="typography-p f-size-l f-weight-l" id="resultAmmountDecimals${this.rootElement?.id}">${decimals}</span></p>
+            </div>`
+        ));
+    }
+
+private formatAmountMiles(amount:number): string{
+    const amountMiles  = new Intl.NumberFormat().format( amount );
+    return amountMiles;
+}
+    private getDecimalPartOfString(numberAsString:string): string {
+        return numberAsString.split('.')[1];
+    }
+
+    private decilmalPartOf(value:number):string {
+        return (value - Math.floor(value)).toFixed(this.calculator.selectedExchangeRate.decimals);
+    }
+}
+function convertXmlToJson(xhttp: XMLHttpRequest) {
+    if(!xhttp || !xhttp.responseXML){
+        throw new Error("Error convirtiendo el XML de tipo de cambio a JSON");
+    }
+    let exchangeRates: ExchangeRates = {
+        USD: [],
+        EUR: []
+    };
+    for (let node of xhttp.responseXML.querySelectorAll('exchangeRates country')) {
+        let name = node.querySelector('name')?.textContent;
+        let buyRateUSD = node.querySelector('buyRateUSD')?.textContent?.replace(',','.');
+        let saleRateUSD = node.querySelector('saleRateUSD')?.textContent?.replace(',','.');
+        let buyRateEUR = node.querySelector('buyRateEUR')?.textContent?.replace(',','.');
+        let saleRateEUR = node.querySelector('saleRateEUR')?.textContent?.replace(',','.');
+
+        for (let exchangeRate of suportedExchangeRates) {
+            if (exchangeRate.country_name == name?.normalize('NFD').replace(/[\u0300-\u036f]/g, "")) {
+                let usdExchangeRate = {...exchangeRate, buy : Number(buyRateUSD), sell : Number(saleRateUSD)};
+
+                let eurExchangeRate ={...exchangeRate, buy : Number(buyRateEUR), sell : Number(saleRateEUR)};
+
+                exchangeRates.USD.push(usdExchangeRate);
+
+                exchangeRates.EUR.push(eurExchangeRate);
+            }
+        }
+    }
+    return exchangeRates;
+}
+
+class ExchangeRateCalc {
+    country: ExchangeRateCountry = 'CR';
+    referenceCurrency: 'USD' | 'EUR' = 'USD';
+    exchangeRates:ExchangeRates;
+    selectedExchangeRate:ExchangeRate;
+    
+    constructor(exchangeRates:ExchangeRates, referenceCurrency:ReferenceCurrency = 'USD', country:ExchangeRateCountry = 'CR') {
+        this.country = country;
+        this.referenceCurrency = referenceCurrency;
+        this.exchangeRates = exchangeRates;
+        let exchangeRate = this.exchangeRates[this.referenceCurrency].find((exchangeRate) => exchangeRate.country_code == this.country);
+        
+        if(exchangeRate){
+            this.selectedExchangeRate = exchangeRate;
+        }else{
+            throw new Error('No existe tipo de cambio para los datos de entrada');
+        }
+    }
+    setCountry(country:ExchangeRateCountry):void{
+        this.country = country;
+    }
+    setReferenceCurrency(referenceCurrency:ReferenceCurrency = 'USD'):void{
+        this.referenceCurrency = referenceCurrency;
+    }
+    getCurrentExchangeRate():ExchangeRate{
+        return this.selectedExchangeRate;
+    }
+    buy(quantityInReferenceCurrency:number):number{
+        let exchangeRate = this.exchangeRates[this.referenceCurrency].find((exchangeRate) => exchangeRate.country_code == this.country);
+        if(exchangeRate?.buy){
+            return exchangeRate.buy * quantityInReferenceCurrency;
+        }else{
+            throw new Error("No existe el tipo de cambio solicitado");
+            
+        }
+        
+    }
+    sell(quantityInLocalCurrency:number):number{
+        let exchangeRate = this.exchangeRates[this.referenceCurrency].find((exchangeRate) => exchangeRate.country_code == this.country);
+        if(exchangeRate?.sell){
+            return quantityInLocalCurrency / exchangeRate.sell;
+        }else{
+            throw new Error("No existe el tipo de cambio solicitado");
+            
+        }
+    }
+}
+  
